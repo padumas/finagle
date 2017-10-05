@@ -21,6 +21,7 @@ private object NameTreeFactory {
   ): ServiceFactory[Req, Rep] = {
 
     lazy val noBrokersAvailableFactory = Failed(new NoBrokersAvailableException(path.show))
+    lazy val noBrokersOpenFactory = Failed(new NoBrokersOpenException(path.show))
 
     case class Failed(exn: Throwable) extends ServiceFactory[Req, Rep] {
       val service: Future[Service[Req, Rep]] = Future.exception(exn)
@@ -46,13 +47,27 @@ private object NameTreeFactory {
       def close(deadline: Time) = Future.Done
     }
 
+    case class Alted(
+      factories: Seq[ServiceFactory[Req, Rep]]
+    ) extends ServiceFactory[Req, Rep] {
+
+      def apply(conn: ClientConnection) = {
+        val open = factories
+          .collectFirst { case f: ServiceFactory[Req, Rep] if f.status == Status.Open => f }
+        open.getOrElse(noBrokersOpenFactory)(conn)
+      }
+
+      // TODO Why does a Weighted use "worseOf"?
+      override def status = Status.bestOf[ServiceFactory[Req, Rep]](factories, _.status)
+
+      def close(deadline: Time) = Future.Done
+    }
+
     def factoryOfTree(tree: NameTree[Key]): ServiceFactory[Req, Rep] =
       tree match {
         case NameTree.Neg | NameTree.Fail | NameTree.Empty => noBrokersAvailableFactory
         case NameTree.Leaf(key) => Leaf(key)
-
-        // it's an invariant of Namer.bind that it returns no Alts
-        case NameTree.Alt(_*) => Failed(new IllegalArgumentException("NameTreeFactory"))
+        case NameTree.Alt(trees@_*) => Alted(trees.map(factoryOfTree))
 
         case NameTree.Union(weightedTrees @ _*) =>
           val (weights, trees) = weightedTrees.unzip { case NameTree.Weighted(w, t) => (w, t) }

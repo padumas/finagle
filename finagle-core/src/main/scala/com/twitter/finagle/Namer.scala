@@ -212,7 +212,39 @@ object Namer {
     new Activity(stateVar)
   }
 
-  // values of the returned activity are simplified and contain no Alt nodes
+  def bindAlt(
+    lookup: Path => Activity[NameTree[Name]],
+    depth: Int,
+    weight: Option[Double],
+    names: Seq[NameTree[Name]]
+  ): Activity[NameTree[Name.Bound]] = {
+    val treeVars: Seq[Var[Activity.State[NameTree[Name.Bound]]]] = names.map {
+      name => bind(lookup, depth, weight)(name).run
+    }
+
+    val stateVar: Var[Activity.State[NameTree[Name.Bound]]] = Var.collect(treeVars).map {
+      seq: Seq[Activity.State[NameTree[Name.Bound]]] =>
+        // - if there's at least one activity in Ok state, return them
+        // - if all activities are pending, the alt node is pending.
+        // - if no subtree is Ok, and there are failures, retain the first failure.
+
+        val oks = seq.collect {
+          case Activity.Ok(t) => t
+        }
+        if (oks.isEmpty) {
+          seq
+            .collectFirst {
+              case f@Activity.Failed(_) => f
+            }
+            .getOrElse(Activity.Pending)
+        } else {
+          // TODO Filter non-ok: (Empty, Fail) => (Empty)
+          Activity.Ok(Alt.fromSeq(oks).simplified)
+        }
+    }
+    new Activity(stateVar)
+  }
+
   private def bind(lookup: Path => Activity[NameTree[Name]], depth: Int, weight: Option[Double])(
     tree: NameTree[Name]
   ): Activity[NameTree[Name.Bound]] =
@@ -243,18 +275,7 @@ object Namer {
 
         case Alt() => Activity.value(Neg)
         case Alt(tree) => bind(lookup, depth, weight)(tree)
-        case Alt(trees @ _*) =>
-          def loop(trees: Seq[NameTree[Name]]): Activity[NameTree[Name.Bound]] =
-            trees match {
-              case Nil => Activity.value(Neg)
-              case Seq(head, tail @ _*) =>
-                bind(lookup, depth, weight)(head).flatMap {
-                  case Fail => Activity.value(Fail)
-                  case Neg => loop(tail)
-                  case head => Activity.value(head)
-                }
-            }
-          loop(trees)
+        case Alt(trees @ _*) => bindAlt(lookup, depth, weight, trees)
       }
 }
 
