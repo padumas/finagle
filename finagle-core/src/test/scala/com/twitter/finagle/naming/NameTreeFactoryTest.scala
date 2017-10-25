@@ -68,21 +68,22 @@ class NameTreeFactoryTest extends FunSuite {
     assert(counts("baz") == 1)
   }
 
-  test("is available iff all leaves are available") {
-    def isAvailable(tree: NameTree[Status]): Boolean =
-      NameTreeFactory(
-        Path.empty,
-        tree,
-        new ServiceFactoryCache[Status, Unit, Unit](
-          key =>
-            new ServiceFactory[Unit, Unit] {
-              def apply(conn: ClientConnection): Future[Service[Unit, Unit]] = Future.value(null)
-              def close(deadline: Time) = Future.Done
-              override def status = key
+  def isAvailable(tree: NameTree[Status]): Boolean =
+    NameTreeFactory(
+      Path.empty,
+      tree,
+      new ServiceFactoryCache[Status, Unit, Unit](
+        key =>
+          new ServiceFactory[Unit, Unit] {
+            def apply(conn: ClientConnection): Future[Service[Unit, Unit]] = Future.value(null)
+            def close(deadline: Time) = Future.Done
+            override def status = key
           },
-          Timer.Nil
-        )
-      ).isAvailable
+        Timer.Nil
+      )
+    ).isAvailable
+
+  test("is available iff all weighted leaves are available") {
 
     assert(
       isAvailable(
@@ -125,6 +126,18 @@ class NameTreeFactoryTest extends FunSuite {
             )
           ),
           NameTree.Weighted(1D, NameTree.Empty)
+        )
+      )
+    )
+
+  }
+
+  test("is available iff at least one alternate leaf is available") {
+    assert(
+      isAvailable(
+        NameTree.Alt(
+          NameTree.Leaf(Status.Busy),
+          NameTree.Leaf(Status.Open)
         )
       )
     )

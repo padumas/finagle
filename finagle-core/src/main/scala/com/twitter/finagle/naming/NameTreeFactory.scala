@@ -3,6 +3,7 @@ package com.twitter.finagle.naming
 import com.twitter.finagle._
 import com.twitter.finagle.factory.ServiceFactoryCache
 import com.twitter.finagle.util.{Drv, Rng}
+import com.twitter.logging.Logger
 import com.twitter.util.{Future, Time}
 
 /**
@@ -12,6 +13,7 @@ import com.twitter.util.{Future, Time}
  * random weighted distributors.
  */
 private object NameTreeFactory {
+  private val log = Logger.get(getClass.getName)
 
   def apply[Key, Req, Rep](
     path: Path,
@@ -21,7 +23,6 @@ private object NameTreeFactory {
   ): ServiceFactory[Req, Rep] = {
 
     lazy val noBrokersAvailableFactory = Failed(new NoBrokersAvailableException(path.show))
-    lazy val noBrokersOpenFactory = Failed(new NoBrokersOpenException(path.show))
 
     case class Failed(exn: Throwable) extends ServiceFactory[Req, Rep] {
       val service: Future[Service[Req, Rep]] = Future.exception(exn)
@@ -52,12 +53,10 @@ private object NameTreeFactory {
     ) extends ServiceFactory[Req, Rep] {
 
       def apply(conn: ClientConnection) = {
-        val open = factories
-          .collectFirst { case f: ServiceFactory[Req, Rep] if f.status == Status.Open => f }
-        open.getOrElse(noBrokersOpenFactory)(conn)
+        log.trace("Alted: " + factories.map(_.status).mkString(", "))
+        factories.sortBy(_.status).headOption.getOrElse(noBrokersAvailableFactory).apply(conn)
       }
 
-      // TODO Why does a Weighted use "worseOf"?
       override def status = Status.bestOf[ServiceFactory[Req, Rep]](factories, _.status)
 
       def close(deadline: Time) = Future.Done
