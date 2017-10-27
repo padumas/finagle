@@ -1,5 +1,6 @@
 package com.twitter.finagle.naming
 
+import com.twitter.finagle.Status.StatusOrdering
 import com.twitter.finagle._
 import com.twitter.finagle.factory.ServiceFactoryCache
 import com.twitter.finagle.util.{Drv, Rng}
@@ -54,7 +55,7 @@ private object NameTreeFactory {
 
       def apply(conn: ClientConnection) = {
         log.trace("Alted: " + factories.map(_.status).mkString(", "))
-        factories.sortBy(_.status).headOption.getOrElse(noBrokersAvailableFactory).apply(conn)
+        factories.sortBy(_.status)(StatusOrdering.reverse).headOption.getOrElse(noBrokersAvailableFactory).apply(conn)
       }
 
       override def status = Status.bestOf[ServiceFactory[Req, Rep]](factories, _.status)
